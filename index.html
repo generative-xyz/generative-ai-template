@@ -55,6 +55,9 @@
 
     <script type="text/javascript">
     // --------------- UTILS LIB ---------------
+    function zip(rows) {
+        return rows[0].map((_, i) => rows.map(row => row[i]));
+    }
 
     function clone(items) {
         return items.map(item => Array.isArray(item) ? clone(item) : item);
@@ -165,7 +168,7 @@
         }
     }
 
-    // --------------- MODEL LIB ---------------
+    // --------------- PERCEPTRON LIB ---------------
 
     class RescaleLayer {
         constructor(scale, offset) {
@@ -202,22 +205,19 @@
     }
 
     class MultilayerPerceptron {
-        constructor(inputDim, preprocessLayers, hiddenLayers, outputLayer) {
-            this.inputDim = inputDim;
+        constructor(preprocessLayers, hiddenLayers, outputLayer) {
             this.preprocessLayers = preprocessLayers;
             this.hiddenLayers = hiddenLayers;
             this.outputLayer = outputLayer;
         }
 
-        getStats() {
+        getInfo() {
             return {
-                inputDim: this.inputDim,
                 hiddenNeurons: this.hiddenLayers.map(e => e.out_dim),
                 activationFunc: getNameFromActivation(this.hiddenLayers[0].activation),
-            }
+            };
         }
 
-        // x must be of Tensor data type
         forward(x) {
             for (const layer of this.preprocessLayers) {
                 x = layer.forward(x);
@@ -230,7 +230,40 @@
         }
     }
 
-    function loadModel(layersConfig, weights_b64) {
+    // --------------- MODEL LIB ---------------
+
+    class Model {
+        constructor(inscription) {
+            const { model_name, layers_config, weight_b64, classes_name } = inscription;
+            const { perceptron, inputDim } = loadPerceptron(layers_config, weight_b64);
+            this.perceptron = perceptron;
+            this.inputDim = inputDim;
+            this.modelName = model_name;
+            this.classesName = classes_name;
+        }
+
+        getInfo() {
+            const { hiddenNeurons, activationFunc } = this.perceptron.getInfo();
+            return {
+                inputDim: this.inputDim,
+                hiddenNeurons,
+                activationFunc,
+                modelName: this.modelName,
+                classesName: this.classesName,
+            };
+        }
+
+        classifyImage(pixels) {
+            const img_tensor = new Tensor(pixels, 1, pixels.length);
+        
+            const result_tensor = this.perceptron.forward(img_tensor);
+            const result = result_tensor.mat[0];
+        
+            return result;
+        }        
+    };
+
+    function loadPerceptron(layersConfig, weights_b64) {
         const preprocessLayers = [];
         const hiddenLayers = [];
 
@@ -269,8 +302,8 @@
 
         const outputLayer = hiddenLayers.pop();
 
-        const model = new MultilayerPerceptron(inputDim, preprocessLayers, hiddenLayers, outputLayer);
-        return model;
+        const perceptron = new MultilayerPerceptron(preprocessLayers, hiddenLayers, outputLayer);
+        return { perceptron, inputDim };
     }
 
     // Modified from https://gist.github.com/sketchpunk/f5fa58a56dcfe6168a9328e7c32a4fd4
@@ -405,7 +438,7 @@
         if (!Array.isArray(classes_name)) return false;
         if (training_traits == null) return false;
         try {
-            loadModel(layers_config, weight_b64);
+            loadPerceptron(layers_config, weight_b64);
         } catch (err) {
             return false;
         }
@@ -493,6 +526,9 @@
         }
     }
 
+    const traits = getTraits();
+    reportTraits(traits);
+
     // ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑ Add traits here ↑↑↑↑↑↑↑↑↑↑↑↑↑↑
 
 
@@ -511,6 +547,7 @@
     document.body.prepend(container);
 
     async function loadAndDisplayInfo() {
+        // Load inscription
         container.innerHTML = "Loading...";
         const inscription = await getModelInscription(inscriptionEndpoint);
 
@@ -519,31 +556,60 @@
             return;
         }
 
-        container.innerHTML = "<div>Loading completed. Model information:</div>";
+        // Load model from inscription
+        const model = new Model(inscription);
+        container.innerHTML = "Loading completed.";
 
-        const {model_name, layers_config, weight_b64, classes_name} = inscription;
+        // Display model information
+        container.appendChild(createParagraph("Model information:"));
 
-        const model = loadModel(layers_config, weight_b64);
-
-        const stats = model.getStats();
-        const [h, w, c] = stats.inputDim;
-
-        const info = [
-            `Model name: ${model_name}`,
-            `Classes name: ${classes_name.join(', ')}`,
+        const {inputDim, hiddenNeurons, activationFunc, modelName, classesName } = model.getInfo();
+        const [h, w, c] = inputDim;
+        const infoDesc = [
+            `Model name: ${modelName}`,
+            `Classes name: ${classesName.join(', ')}`,
             `Input dimension: ${h} x ${w} x ${c}`,
-            `Hidden layer neurons count: ${stats.hiddenNeurons.join(', ')}`,
-            `Activation function: ${stats.activationFunc}`,
-        ]
-        
+            `Hidden layer neurons count: ${hiddenNeurons.join(', ')}`,
+            `Activation function: ${activationFunc}`,
+        ]        
+        const infoList = createUnorderedList(infoDesc)
+        container.appendChild(infoList);
+
+        // Predict a randomly generated image and display result
+        container.appendChild(createParagraph("Random image predicting result:"));
+
+        imagePixels = [];
+        for(let i = 0; i < w * h * c; ++i)
+            imagePixels.push(Math.random() * 256);
+
+        const result = model.classifyImage(imagePixels);
+            
+        const formatted_result = formatResult(result, classesName);
+        const result_list = createUnorderedList(formatted_result);
+        container.append(result_list);
+    }
+
+    function formatResult(result, classes_name) {
+        const predictions = zip([result, classes_name]);
+
+        const sorted_predictions = predictions.sort((a, b) => a[0] > b[0] ? -1 : 1);
+        return sorted_predictions.map(e => `${e[1]}: ${(e[0] * 100).toFixed(2)}%`);
+    }
+
+    function createParagraph(text) {
+        const div = document.createElement("div");
+        div.innerText = text;
+        return div;
+    }
+
+    function createUnorderedList(items) {        
         const ul = document.createElement("ul");
-        info.forEach((text) => {
+        items.forEach((text) => {
             const li = document.createElement("li");
             li.appendChild(document.createTextNode(text)); 
             ul.appendChild(li);
         })
-
-        container.append(ul);
+        return ul
     }
 
     loadAndDisplayInfo();
