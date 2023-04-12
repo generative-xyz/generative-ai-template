@@ -215,6 +215,10 @@
             return {
                 hiddenNeurons: this.hiddenLayers.map(e => e.out_dim),
                 activationFunc: getNameFromActivation(this.hiddenLayers[0].activation),
+                parameters: this.hiddenLayers.map(e => ({
+                    w: e.w, 
+                    b: e.b,
+                })),
             };
         }
 
@@ -243,9 +247,10 @@
         }
 
         getInfo() {
-            const { hiddenNeurons, activationFunc } = this.perceptron.getInfo();
+            const { hiddenNeurons, activationFunc, parameters } = this.perceptron.getInfo();
             return {
                 inputDim: this.inputDim,
+                parameters,
                 hiddenNeurons,
                 activationFunc,
                 modelName: this.modelName,
@@ -563,7 +568,8 @@
         // Display model information
         container.appendChild(createParagraph("Model information:"));
 
-        const {inputDim, hiddenNeurons, activationFunc, modelName, classesName } = model.getInfo();
+        const {inputDim, parameters, hiddenNeurons, activationFunc, modelName, classesName } = model.getInfo();
+
         const [h, w, c] = inputDim;
         const infoDesc = [
             `Model name: ${modelName}`,
@@ -571,9 +577,11 @@
             `Input dimension: ${h} x ${w} x ${c}`,
             `Hidden layer neurons count: ${hiddenNeurons.join(', ')}`,
             `Activation function: ${activationFunc}`,
-        ]        
-        const infoList = createUnorderedList(infoDesc)
+        ];
+        const infoList = createUnorderedList(infoDesc);
         container.appendChild(infoList);
+
+        console.log(parameters);
 
         // Predict a randomly generated image and display result
         container.appendChild(createParagraph("Random image predicting result:"));
